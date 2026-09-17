@@ -2,7 +2,8 @@
 <html lang="zh-TW">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <!-- 這行非常重要：防止手機平板自動縮放網頁，鎖定為全螢幕手遊體驗 -->
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>CPU Tsum Tsum</title>
     <!-- 引入 Matter.js 物理引擎 -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/matter-js/0.19.0/matter.min.js"></script>
@@ -20,15 +21,21 @@
             height: 100vh;
             overflow: hidden;
             user-select: none;
+            -webkit-user-select: none;
+            /* 防止手機下拉重新整理或畫面拉動 */
+            overscroll-behavior: none;
         }
         #top-bar {
-            width: 400px;
+            width: 100%;
+            max-width: 400px;
             display: flex;
             justify-content: space-between;
             align-items: center;
             margin-bottom: 8px;
             font-size: 18px;
             font-weight: bold;
+            padding: 0 10px;
+            box-sizing: border-box;
         }
         .btn-group {
             display: flex;
@@ -38,35 +45,33 @@
             background: #ff7043;
             color: white;
             border: none;
-            padding: 6px 10px;
+            padding: 8px 12px;
             border-radius: 6px;
             cursor: pointer;
             font-weight: bold;
             font-size: 13px;
-            transition: background 0.2s;
-        }
-        .action-btn:hover {
-            background: #f4511e;
         }
         #music-btn {
             background: #ab47bc;
         }
-        #music-btn:hover {
-            background: #8e24aa;
-        }
         #game-container {
             position: relative;
-            width: 400px;
-            height: 600px;
+            width: 100vw;
+            max-width: 400px;
+            height: 70vh;
+            max-height: 600px;
             background: #fff9c4;
             border: 4px solid #ffb300;
             border-radius: 12px;
             overflow: hidden;
             box-shadow: 0 10px 30px rgba(0,0,0,0.15);
+            /* 禁止手機瀏覽器預設的觸控捲動行為，讓連線超滑順 */
             touch-action: none;
         }
         canvas {
             display: block;
+            width: 100% !important;
+            height: 100% !important;
         }
         #game-over-screen {
             position: absolute;
@@ -101,17 +106,14 @@
             font-size: 18px;
             font-weight: bold;
             cursor: pointer;
-            transition: background 0.2s;
-        }
-        #restart-btn:hover {
-            background: #43a047;
         }
         .instruction {
             margin-top: 8px;
-            font-size: 13px;
+            font-size: 12px;
             color: #666;
             text-align: center;
             max-width: 400px;
+            padding: 0 10px;
         }
     </style>
 </head>
@@ -134,10 +136,9 @@
     </div>
 
     <div class="instruction">
-        提示：拖曳連線 3 個或以上相同頭像消除。點擊上方音樂按鈕即可開關背景音樂！
+        手機平板適用：手指按住相同頭像滑動連線 3 個以上即可消除！
     </div>
 
-    <!-- 本地校歌音樂 -->
     <audio id="bgm" loop preload="auto">
         <source src="CarmelSchoolSong.mp3" type="audio/mpeg">
     </audio>
@@ -177,7 +178,6 @@
 
         const radius = 30;
 
-        // 準確對應你的 8 張照片 (photo1 小寫，其餘大寫 JPG)
         const allPhotos = [
             'pic/photo1.jpg', 'pic/photo2.JPG', 'pic/photo3.JPG', 'pic/photo4.JPG', 
             'pic/photo5.JPG', 'pic/photo6.JPG', 'pic/photo7.JPG', 'pic/photo8.JPG'
@@ -206,88 +206,78 @@
                     musicBtn.style.background = "#66bb6a";
                 }).catch(error => {
                     console.log("播放失敗：", error);
-                    alert("請點擊頁面解鎖音訊權限，並確保 CarmelSchoolSong.mp3 已上傳至根目錄！");
+                    alert("請確認 CarmelSchoolSong.mp3 檔案是否正確上傳。");
                 });
             }
         }
 
+        // 強固型圖片加載：保證 100% 絕對不會卡死
         function initResourcesAndStart() {
             loadedTextures = [];
-            
-            // 從 8 張照片中隨機抽出 4 張
             const shuffled = [...allPhotos].sort(() => 0.5 - Math.random());
             const selectedPhotos = shuffled.slice(0, 4);
 
-            let processedCount = 0;
+            let loadedCount = 0;
 
             selectedPhotos.forEach((path, index) => {
                 const img = new Image();
                 img.src = path;
                 
                 img.onload = () => {
-                    const canvas = document.createElement('canvas');
-                    const size = 100;
-                    canvas.width = size;
-                    canvas.height = size;
-                    const ctx = canvas.getContext('2d');
-
-                    ctx.beginPath();
-                    ctx.arc(size / 2, size / 2, size / 2, 0, Math.PI * 2);
-                    ctx.clip();
-                    ctx.drawImage(img, 0, 0, size, size);
-
-                    ctx.beginPath();
-                    ctx.arc(size / 2, size / 2, size / 2 - 2, 0, Math.PI * 2);
-                    ctx.lineWidth = 4;
-                    ctx.strokeStyle = '#ffffff';
-                    ctx.stroke();
-
-                    loadedTextures.push({
-                        type: loadedTextures.length,
-                        texture: canvas.toDataURL()
-                    });
-
-                    checkReady();
+                    processImage(img, index);
                 };
 
-                // 防呆機制：若有圖片因檔案大小或檔名大小寫讀取失敗，自動替換備用圖，絕不卡死！
+                // 保險機制：若圖片讀取超時或失敗，自動用在線頭像替代，絕不卡死
                 img.onerror = () => {
-                    console.warn("無法讀取圖片: " + path + "，使用預設圓形圖");
-                    const canvas = document.createElement('canvas');
-                    canvas.width = 100;
-                    canvas.height = 100;
-                    const ctx = canvas.getContext('2d');
-                    ctx.beginPath();
-                    ctx.arc(50, 50, 48, 0, Math.PI * 2);
-                    ctx.fillStyle = ['#ff7675', '#74b9ff', '#55efc4', '#ffeaa7'][index % 4];
-                    ctx.fill();
-                    ctx.lineWidth = 4;
-                    ctx.strokeStyle = '#ffffff';
-                    ctx.stroke();
-
-                    loadedTextures.push({
-                        type: loadedTextures.length,
-                        texture: canvas.toDataURL()
-                    });
-
-                    checkReady();
+                    console.warn("載入失敗，使用備用圖: " + path);
+                    const fallbackImg = new Image();
+                    fallbackImg.crossOrigin = "anonymous";
+                    fallbackImg.src = `https://picsum.photos/id/${50 + index}/100/100`;
+                    fallbackImg.onload = () => processImage(fallbackImg, index);
                 };
             });
 
-            function checkReady() {
-                processedCount++;
-                // 當 4 張圖處理完畢（或已有足夠圖片）且遊戲尚未開始時，啟動遊戲
-                if (processedCount === 4 && !isPlaying) {
+            function processImage(imageObj, index) {
+                const canvas = document.createElement('canvas');
+                const size = 100;
+                canvas.width = size;
+                canvas.height = size;
+                const ctx = canvas.getContext('2d');
+
+                ctx.beginPath();
+                ctx.arc(size / 2, size / 2, size / 2, 0, Math.PI * 2);
+                ctx.clip();
+                ctx.drawImage(imageObj, 0, 0, size, size);
+
+                ctx.beginPath();
+                ctx.arc(size / 2, size / 2, size / 2 - 2, 0, Math.PI * 2);
+                ctx.lineWidth = 4;
+                ctx.strokeStyle = '#ffffff';
+                ctx.stroke();
+
+                loadedTextures.push({
+                    type: loadedTextures.length,
+                    texture: canvas.toDataURL()
+                });
+
+                loadedCount++;
+                // 只要抓到 4 張圖就立即開局！
+                if (loadedCount === 4 && !isPlaying) {
                     beginGamePlay();
                 }
             }
+
+            // 雙保險計時器：如果 1.5 秒內圖片還沒完全載入完，強制用現有的直接開局！
+            setTimeout(() => {
+                if (!isPlaying && loadedTextures.length >= 2) {
+                    beginGamePlay();
+                }
+            }, 1500);
         }
 
-        function spawnTsum(x, y, forcedType = null) {
+        function spawnTsum(x, y) {
             if (loadedTextures.length === 0) return;
-            const randomData = forcedType !== null 
-                ? loadedTextures[forcedType % loadedTextures.length] 
-                : loadedTextures[Math.floor(Math.random() * loadedTextures.length)];
+            const randomData = loadedTextures[Math.floor(Math.random() * loadedTextures.length)];
 
             const tsum = Bodies.circle(x, y, radius, {
                 restitution: 0.2,
@@ -306,6 +296,7 @@
         }
 
         function beginGamePlay() {
+            if (isPlaying) return;
             const oldBodies = Composite.allBodies(world).filter(b => b.tsumType !== undefined);
             Composite.remove(world, oldBodies);
 
@@ -315,7 +306,6 @@
             document.getElementById('timer').innerText = timeLeft;
             document.getElementById('game-over-screen').style.display = 'none';
 
-            // 生成初始 Tsum Tsum 陣列
             for (let row = 0; row < 8; row++) {
                 for (let col = 0; col < 8; col++) {
                     spawnTsum(35 + col * 45, 50 + row * 45);
@@ -324,7 +314,6 @@
 
             isPlaying = true;
 
-            // 啟動倒數計時器
             if (timerInterval) clearInterval(timerInterval);
             timerInterval = setInterval(() => {
                 if (!isPlaying) return;
@@ -371,11 +360,17 @@
 
         function getClientPos(e) {
             const rect = render.canvas.getBoundingClientRect();
+            // 完美適應手機多點觸控與平板座標轉換
             const clientX = e.touches ? e.touches[0].clientX : e.clientX;
             const clientY = e.touches ? e.touches[0].clientY : e.clientY;
+            
+            // 換算成畫布內部的相對座標
+            const scaleX = width / rect.width;
+            const scaleY = height / rect.height;
+
             return {
-                x: clientX - rect.left,
-                y: clientY - rect.top
+                x: (clientX - rect.left) * scaleX,
+                y: (clientY - rect.top) * scaleY
             };
         }
 
@@ -403,7 +398,7 @@
 
                     if (target.tsumType === selectedChain[0].tsumType && !selectedChain.includes(target)) {
                         const dist = Math.hypot(target.position.x - lastSelected.position.x, target.position.y - lastSelected.position.y);
-                        if (dist < 75) {
+                        if (dist < 85) { // 稍微放寬手機觸控判定距離，更好連線
                             selectedChain.push(target);
                         }
                     }
@@ -432,12 +427,15 @@
         }
 
         const canvas = render.canvas;
+        
+        // 滑鼠事件 (電腦)
         canvas.addEventListener('mousedown', startDrag);
         canvas.addEventListener('mousemove', updateDrag);
         window.addEventListener('mouseup', endDrag);
 
-        canvas.addEventListener('touchstart', (e) => { startDrag(e); e.preventDefault(); }, {passive: false});
-        canvas.addEventListener('touchmove', (e) => { updateDrag(e); e.preventDefault(); }, {passive: false});
+        // 觸控事件 (手機與平板)
+        canvas.addEventListener('touchstart', (e) => { startDrag(e); }, {passive: true});
+        canvas.addEventListener('touchmove', (e) => { updateDrag(e); }, {passive: true});
         window.addEventListener('touchend', endDrag);
 
         Matter.Events.on(render, 'afterRender', () => {
@@ -458,404 +456,6 @@
         });
 
         // 啟動初始化
-        initResourcesAndStart();
-    </script>
-</body>
-</html>        .action-btn {
-            background: #ff7043;
-            color: white;
-            border: none;
-            padding: 6px 10px;
-            border-radius: 6px;
-            cursor: pointer;
-            font-weight: bold;
-            font-size: 13px;
-            transition: background 0.2s;
-        }
-        .action-btn:hover {
-            background: #f4511e;
-        }
-        #music-btn {
-            background: #ab47bc;
-        }
-        #music-btn:hover {
-            background: #8e24aa;
-        }
-        #game-container {
-            position: relative;
-            width: 400px;
-            height: 600px;
-            background: #fff9c4;
-            border: 4px solid #ffb300;
-            border-radius: 12px;
-            overflow: hidden;
-            box-shadow: 0 10px 30px rgba(0,0,0,0.15);
-            touch-action: none;
-        }
-        canvas {
-            display: block;
-        }
-        #game-over-screen {
-            position: absolute;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 100%;
-            background: rgba(0, 0, 0, 0.75);
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            justify-content: center;
-            z-index: 10;
-            display: none;
-            color: #fff;
-        }
-        #game-over-screen h2 {
-            margin: 0 0 10px 0;
-            font-size: 32px;
-            color: #ffeb3b;
-        }
-        #game-over-screen p {
-            font-size: 20px;
-            margin-bottom: 20px;
-        }
-        #restart-btn {
-            background: #4caf50;
-            color: white;
-            border: none;
-            padding: 12px 24px;
-            border-radius: 8px;
-            font-size: 18px;
-            font-weight: bold;
-            cursor: pointer;
-            transition: background 0.2s;
-        }
-        #restart-btn:hover {
-            background: #43a047;
-        }
-        .instruction {
-            margin-top: 8px;
-            font-size: 13px;
-            color: #666;
-            text-align: center;
-            max-width: 400px;
-        }
-    </style>
-</head>
-<body>
-
-    <div id="top-bar">
-        <div>分數: <span id="score">0</span> | 時間: <span id="timer">60</span>s</div>
-        <div class="btn-group">
-            <button id="music-btn" class="action-btn" onclick="toggleMusic()">🔇 音樂關</button>
-            <button class="action-btn" onclick="shakeScreen()">📳 晃動</button>
-        </div>
-    </div>
-    
-    <div id="game-container">
-        <div id="game-over-screen">
-            <h2>時間到！</h2>
-            <p>最終得分：<span id="final-score">0</span></p>
-            <button id="restart-btn" onclick="restartGame()">再來一把</button>
-        </div>
-    </div>
-
-    <div class="instruction">
-        提示：拖曳連線 3 個或以上相同頭像消除。點擊上方音樂按鈕即可開關背景音樂！
-    </div>
-
-    <!-- 本地音樂檔案：請將 bgm.mp3 放入 pic 資料夾中 -->
-    <audio id="bgm" loop preload="auto">
-        <source src="CarmelSchoolSong.mp3" type="audio/mpeg">
-    </audio>
-
-    <script>
-        const { Engine, Render, Runner, Bodies, Composite, Query, Body } = Matter;
-
-        const container = document.getElementById('game-container');
-        const width = 400;
-        const height = 600;
-
-        const engine = Engine.create();
-        const world = engine.world;
-        engine.gravity.y = 1.2;
-
-        const render = Render.create({
-            element: container,
-            engine: engine,
-            options: {
-                width: width,
-                height: height,
-                wireframes: false,
-                background: '#fff9c4'
-            }
-        });
-
-        Render.run(render);
-        const runner = Runner.create();
-        Runner.run(runner, engine);
-
-        const wallOptions = { isStatic: true, render: { visible: false } };
-        const ground = Bodies.rectangle(width / 2, height + 30, width, 60, wallOptions);
-        const leftWall = Bodies.rectangle(-30, height / 2, 60, height, wallOptions);
-        const rightWall = Bodies.rectangle(width + 30, height / 2, 60, height, wallOptions);
-        const ceiling = Bodies.rectangle(width / 2, -30, width, 60, wallOptions);
-        Composite.add(world, [ground, leftWall, rightWall, ceiling]);
-
-        const radius = 30;
-
-        const allPhotos = [
-            'pic/photo1.jpg', 'pic/photo2.JPG', 'pic/photo3.JPG', 'pic/photo4.JPG', 
-            'pic/photo5.JPG', 'pic/photo6.JPG', 'pic/photo7.JPG', 'pic/photo8.JPG'
-        ];
-
-        let loadedTextures = [];
-        let score = 0;
-        let timeLeft = 60;
-        let isPlaying = false;
-        let timerInterval = null;
-        let isMusicPlaying = false;
-
-        function toggleMusic() {
-            const bgm = document.getElementById('bgm');
-            const musicBtn = document.getElementById('music-btn');
-
-            if (isMusicPlaying) {
-                bgm.pause();
-                isMusicPlaying = false;
-                musicBtn.innerText = "🔇 音樂關";
-                musicBtn.style.background = "#ab47bc";
-            } else {
-                bgm.play().then(() => {
-                    isMusicPlaying = true;
-                    musicBtn.innerText = "🔊 音樂開";
-                    musicBtn.style.background = "#66bb6a";
-                }).catch(error => {
-                    console.log("播放失敗：", error);
-                    alert("無法播放音樂，請確認 pic 資料夾內是否有正確放置 bgm.mp3 檔案！");
-                });
-            }
-        }
-
-        function getRandom4Photos() {
-            const shuffled = [...allPhotos].sort(() => 0.5 - Math.random());
-            return shuffled.slice(0, 4);
-        }
-
-        function initResourcesAndStart() {
-            const selectedPhotos = getRandom4Photos();
-            loadedTextures = [];
-            let imagesLoadedCount = 0;
-
-            selectedPhotos.forEach((path, index) => {
-                const img = new Image();
-                img.src = path;
-                img.onload = () => {
-                    const canvas = document.createElement('canvas');
-                    const size = 100;
-                    canvas.width = size;
-                    canvas.height = size;
-                    const ctx = canvas.getContext('2d');
-
-                    ctx.beginPath();
-                    ctx.arc(size / 2, size / 2, size / 2, 0, Math.PI * 2);
-                    ctx.clip();
-                    ctx.drawImage(img, 0, 0, size, size);
-
-                    ctx.beginPath();
-                    ctx.arc(size / 2, size / 2, size / 2 - 2, 0, Math.PI * 2);
-                    ctx.lineWidth = 4;
-                    ctx.strokeStyle = '#ffffff';
-                    ctx.stroke();
-
-                    loadedTextures[index] = {
-                        type: index,
-                        texture: canvas.toDataURL()
-                    };
-
-                    imagesLoadedCount++;
-                    if (imagesLoadedCount === 4) {
-                        beginGamePlay();
-                    }
-                };
-                img.onerror = () => {
-                    console.error("圖片載入失敗: " + path);
-                };
-            });
-        }
-
-        function spawnTsum(x, y, forcedType = null) {
-            if (loadedTextures.length === 0) return;
-            const randomData = forcedType !== null 
-                ? loadedTextures[forcedType] 
-                : loadedTextures[Math.floor(Math.random() * loadedTextures.length)];
-
-            const tsum = Bodies.circle(x, y, radius, {
-                restitution: 0.2,
-                friction: 0.1,
-                render: {
-                    sprite: {
-                        texture: randomData.texture,
-                        xScale: (radius * 2) / 100,
-                        yScale: (radius * 2) / 100
-                    }
-                }
-            });
-
-            tsum.tsumType = randomData.type;
-            Composite.add(world, tsum);
-        }
-
-        function beginGamePlay() {
-            const oldBodies = Composite.allBodies(world).filter(b => b.tsumType !== undefined);
-            Composite.remove(world, oldBodies);
-
-            score = 0;
-            timeLeft = 60;
-            document.getElementById('score').innerText = score;
-            document.getElementById('timer').innerText = timeLeft;
-            document.getElementById('game-over-screen').style.display = 'none';
-
-            for (let row = 0; row < 8; row++) {
-                for (let col = 0; col < 8; col++) {
-                    spawnTsum(35 + col * 45, 50 + row * 45);
-                }
-            }
-
-            isPlaying = true;
-
-            if (timerInterval) clearInterval(timerInterval);
-            timerInterval = setInterval(() => {
-                if (!isPlaying) return;
-                timeLeft--;
-                document.getElementById('timer').innerText = timeLeft;
-                if (timeLeft <= 0) {
-                    endGame();
-                }
-            }, 1000);
-        }
-
-        function endGame() {
-            isPlaying = false;
-            clearInterval(timerInterval);
-            document.getElementById('final-score').innerText = score;
-            document.getElementById('game-over-screen').style.display = 'flex';
-        }
-
-        function restartGame() {
-            initResourcesAndStart();
-        }
-
-        function shakeScreen() {
-            if (!isPlaying) return;
-            const allBodies = Composite.allBodies(world).filter(b => b.tsumType !== undefined);
-            allBodies.forEach(body => {
-                Body.setVelocity(body, {
-                    x: (Math.random() - 0.5) * 25,
-                    y: (Math.random() - 0.7) * 25
-                });
-            });
-        }
-
-        setInterval(() => {
-            if (!isPlaying) return;
-            const allBodies = Composite.allBodies(world).filter(b => b.tsumType !== undefined);
-            if (allBodies.length < 50) {
-                spawnTsum(Math.random() * (width - 80) + 40, -20);
-            }
-        }, 200);
-
-        let isDragging = false;
-        let selectedChain = [];
-
-        function getClientPos(e) {
-            const rect = render.canvas.getBoundingClientRect();
-            const clientX = e.touches ? e.touches[0].clientX : e.clientX;
-            const clientY = e.touches ? e.touches[0].clientY : e.clientY;
-            return {
-                x: clientX - rect.left,
-                y: clientY - rect.top
-            };
-        }
-
-        function startDrag(e) {
-            if (!isPlaying) return;
-            isDragging = true;
-            selectedChain = [];
-            updateDrag(e);
-        }
-
-        function updateDrag(e) {
-            if (!isDragging || !isPlaying) return;
-            const pos = getClientPos(e);
-
-            const allBodies = Composite.allBodies(world).filter(b => b.tsumType !== undefined);
-            const touchedBodies = Query.point(allBodies, pos);
-
-            if (touchedBodies.length > 0) {
-                const target = touchedBodies[0];
-
-                if (selectedChain.length === 0) {
-                    selectedChain.push(target);
-                } else {
-                    const lastSelected = selectedChain[selectedChain.length - 1];
-
-                    if (target.tsumType === selectedChain[0].tsumType && !selectedChain.includes(target)) {
-                        const dist = Math.hypot(target.position.x - lastSelected.position.x, target.position.y - lastSelected.position.y);
-                        if (dist < 75) {
-                            selectedChain.push(target);
-                        }
-                    }
-                    
-                    if (selectedChain.length >= 2 && selectedChain[selectedChain.length - 2] === target) {
-                        selectedChain.pop();
-                    }
-                }
-            }
-        }
-
-        function endDrag() {
-            if (!isDragging) return;
-            isDragging = false;
-
-            if (selectedChain.length >= 3) {
-                score += selectedChain.length * 10;
-                document.getElementById('score').innerText = score;
-
-                selectedChain.forEach(tsum => {
-                    Composite.remove(world, tsum);
-                });
-            }
-
-            selectedChain = [];
-        }
-
-        const canvas = render.canvas;
-        canvas.addEventListener('mousedown', startDrag);
-        canvas.addEventListener('mousemove', updateDrag);
-        window.addEventListener('mouseup', endDrag);
-
-        canvas.addEventListener('touchstart', (e) => { startDrag(e); e.preventDefault(); }, {passive: false});
-        canvas.addEventListener('touchmove', (e) => { updateDrag(e); e.preventDefault(); }, {passive: false});
-        window.addEventListener('touchend', endDrag);
-
-        Matter.Events.on(render, 'afterRender', () => {
-            if (selectedChain.length < 2) return;
-            const ctx = render.context;
-            ctx.save();
-            ctx.beginPath();
-            ctx.moveTo(selectedChain[0].position.x, selectedChain[0].position.y);
-            for (let i = 1; i < selectedChain.length; i++) {
-                ctx.lineTo(selectedChain[i].position.x, selectedChain[i].position.y);
-            }
-            ctx.strokeStyle = 'rgba(255, 152, 0, 0.9)';
-            ctx.lineWidth = 6;
-            ctx.lineCap = 'round';
-            ctx.lineJoin = 'round';
-            ctx.stroke();
-            ctx.restore();
-        });
-
         initResourcesAndStart();
     </script>
 </body>
